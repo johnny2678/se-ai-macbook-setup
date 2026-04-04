@@ -437,20 +437,17 @@ install_java() {
 # ============================================================================
 
 check_git_credential_helper() {
-    local helper
-    helper=$(git config --global credential.helper 2>/dev/null || true)
-    if [[ "$helper" == "osxkeychain" ]]; then
-        return 0
-    fi
-    return 1
+    # Returns 0 if osxkeychain is among the configured helpers (handles multiple values)
+    git config --global --get-all credential.helper 2>/dev/null | grep -q "^osxkeychain$"
 }
 
 setup_git_credential_helper() {
     if ! check_git_credential_helper; then
-        git config --global credential.helper osxkeychain
-        print_success "git credential.helper set to osxkeychain"
+        # Use --add so we don't clobber any existing helpers (e.g. manager, store)
+        git config --global --add credential.helper osxkeychain
+        print_success "git credential.helper osxkeychain added"
     else
-        print_success "git credential.helper already set to osxkeychain"
+        print_success "git credential.helper already includes osxkeychain"
     fi
 }
 
@@ -466,6 +463,46 @@ check_soma_reachable() {
     return 1
 }
 
+check_soma_authenticated() {
+    # 1. Keychain check — security returns non-zero if no entry; use if to stay set -e safe
+    if ! security find-internet-password -s git.soma.salesforce.com &>/dev/null; then
+        return 1
+    fi
+    # 2. Probe sentinel repo; GIT_TERMINAL_PROMPT=0 prevents interactive credential prompts
+    if ! GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code \
+            "https://git.soma.salesforce.com/john-hill/se-ai-macbook-setup.git" \
+            HEAD &>/dev/null; then
+        return 1  # Keychain entry exists but PAT is expired/revoked
+    fi
+    return 0
+}
+
+check_emu_authenticated() {
+    local emu_account
+    # Wrap security in { || true; } so pipefail doesn't fire when there's no github.com entry
+    emu_account=$({ security find-internet-password -s github.com 2>/dev/null || true; } \
+        | { grep "acct" || true; } \
+        | { grep "_sfemu" || true; } \
+        | sed 's/.*= "//' | tr -d '"' | head -1)
+    if [[ -z "$emu_account" ]]; then
+        return 1  # No _sfemu keychain entry
+    fi
+    if ! GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code \
+            "https://github.com/Authoring-Agent/agentforce-adlc.git" \
+            HEAD &>/dev/null; then
+        return 1  # _sfemu entry exists but PAT is expired/revoked
+    fi
+    return 0
+}
+
+get_emu_account() {
+    # Returns the _sfemu username from keychain, or empty string — never fails
+    { security find-internet-password -s github.com 2>/dev/null || true; } \
+        | { grep "acct" || true; } \
+        | { grep "_sfemu" || true; } \
+        | sed 's/.*= "//' | tr -d '"' | head -1
+}
+
 setup_git_soma() {
     echo ""
     echo -e "${BOLD}  git.soma (GitHub Enterprise)${NC}"
@@ -473,10 +510,21 @@ setup_git_soma() {
     explain "Internal Salesforce GitHub. Full guide: docs/git-soma-setup.md"
     echo ""
 
-    # Reachability
-    print_step "Checking git.soma.salesforce.com reachability..."
+    # Pre-check: keychain + live auth probe
+    print_step "Checking git.soma authentication..."
+    if check_soma_authenticated; then
+        print_success "Already authenticated to git.soma (keychain PAT verified)"
+        return 0
+    fi
+
+    # Distinguish: reachable but no valid creds vs. not reachable at all
     if check_soma_reachable; then
         print_success "git.soma.salesforce.com is reachable"
+        if security find-internet-password -s git.soma.salesforce.com &>/dev/null; then
+            print_warning "Keychain has a git.soma entry but authentication failed — PAT may be expired"
+            print_info "Regenerate your PAT: git.soma → Profile → Settings → Access Tokens"
+            return 0
+        fi
     else
         print_warning "git.soma.salesforce.com is not reachable"
         print_info "This usually means you need to request AD group access first."
@@ -515,9 +563,17 @@ setup_git_soma() {
     # PAT setup
     echo ""
     if confirm "Have you generated a Personal Access Token on git.soma?"; then
-        print_success "PAT confirmed"
-        print_info "When you clone a git.soma repo, use your PAT as the password."
-        print_info "macOS Keychain will cache it automatically."
+        print_step "Verifying git.soma access with your PAT..."
+        if GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code \
+                "https://git.soma.salesforce.com/john-hill/se-ai-macbook-setup.git" \
+                HEAD &>/dev/null; then
+            print_success "git.soma access verified — PAT works and is cached in Keychain"
+        else
+            print_warning "Could not authenticate to git.soma — PAT may not be stored yet"
+            print_info "Clone any git.soma repo via HTTPS to trigger the Keychain prompt:"
+            print_info "  git clone https://git.soma.salesforce.com/<org>/<repo>.git"
+            print_info "  Use your PAT as the password — macOS Keychain will cache it."
+        fi
     else
         print_info "To generate a token:"
         print_info "  git.soma → Profile → Settings → Access Tokens"
@@ -531,6 +587,26 @@ setup_git_emu() {
     echo "  ────────────────────────────────────────"
     explain "Salesforce orgs on github.com with _sfemu accounts. Full guide: docs/git-emu-setup.md"
     echo ""
+
+    # Pre-check: keychain _sfemu entry + live auth probe
+    print_step "Checking git EMU authentication..."
+    if check_emu_authenticated; then
+        local emu_acct
+        emu_acct=$(get_emu_account)
+        print_success "Already authenticated to GitHub EMU${emu_acct:+ as $emu_acct} (keychain PAT verified)"
+        return 0
+    fi
+
+    # Distinguish: _sfemu keychain entry exists but auth failed vs. no entry at all
+    local emu_acct
+    emu_acct=$(get_emu_account)
+    if [[ -n "$emu_acct" ]]; then
+        print_warning "Keychain has an EMU entry ($emu_acct) but authentication failed — PAT may be expired"
+        print_info "Regenerate your PAT: github.com (as $emu_acct) → Settings → Developer settings"
+        print_info "  → Personal access tokens → Tokens (classic) → Generate new token"
+        print_info "  Minimum scopes: repo, read:org"
+        return 0
+    fi
 
     # Step 1: EMU account created?
     if confirm "Have you clicked the 'GitHub Salesforce - EMU' tile in Okta to create your EMU account?"; then
@@ -561,8 +637,18 @@ setup_git_emu() {
     # PAT setup
     echo ""
     if confirm "Have you generated a Personal Access Token for your _sfemu account on github.com?"; then
-        print_success "EMU PAT confirmed"
-        print_info "When you clone, use your _sfemu username and PAT as the password."
+        print_step "Verifying git EMU access with your PAT..."
+        if GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code \
+                "https://github.com/Authoring-Agent/agentforce-adlc.git" \
+                HEAD &>/dev/null; then
+            print_success "git EMU access verified — PAT works and is cached in Keychain"
+        else
+            print_warning "Could not authenticate to GitHub EMU — PAT may not be stored yet"
+            print_info "Clone any EMU repo via HTTPS to trigger the Keychain prompt:"
+            print_info "  git clone https://github.com/<org>/<repo>.git"
+            print_info "  Use your _sfemu username and PAT as the password."
+            print_info "  macOS Keychain will cache it for future use."
+        fi
     else
         print_info "To generate a token:"
         print_info "  github.com (logged in as _sfemu) → Settings → Developer settings"
@@ -576,7 +662,32 @@ run_git_access_phase() {
     echo -e "${BOLD}Phase 6: Salesforce Git Access (Optional)${NC}"
     echo "════════════════════════════════════════════════"
     explain "Sets up credentials for git.soma and GitHub EMU."
+    echo ""
 
+    # Pre-flight status check — runs silently, shows a summary
+    print_step "Checking existing git access..."
+    local soma_ok=false emu_ok=false
+    check_soma_authenticated && soma_ok=true
+    check_emu_authenticated  && emu_ok=true
+
+    if $soma_ok; then
+        print_success "git.soma       — authenticated"
+    else
+        print_warning "git.soma       — not yet configured"
+    fi
+    if $emu_ok; then
+        print_success "git EMU        — authenticated"
+    else
+        print_warning "git EMU        — not yet configured"
+    fi
+
+    # If both are already good, nothing to do
+    if $soma_ok && $emu_ok; then
+        print_success "Both git environments already configured — nothing to do"
+        return 0
+    fi
+
+    echo ""
     if ! confirm "Set up Salesforce git access now?" "n"; then
         print_info "Skipped. Run the script again or see docs/git-soma-setup.md and docs/git-emu-setup.md"
         return 0
@@ -586,15 +697,19 @@ run_git_access_phase() {
     print_step "Configuring git credential helper..."
     setup_git_credential_helper
 
-    # git.soma
+    # git.soma — skip prompt if already authenticated
     echo ""
-    if confirm "Set up git.soma (git.soma.salesforce.com)?"; then
+    if $soma_ok; then
+        print_success "git.soma already authenticated — skipping"
+    elif confirm "Set up git.soma (git.soma.salesforce.com)?"; then
         setup_git_soma
     fi
 
-    # git EMU
+    # git EMU — skip prompt if already authenticated
     echo ""
-    if confirm "Set up git EMU (github.com _sfemu account)?"; then
+    if $emu_ok; then
+        print_success "git EMU already authenticated — skipping"
+    elif confirm "Set up git EMU (github.com _sfemu account)?"; then
         setup_git_emu
     fi
 }
@@ -648,12 +763,13 @@ run_health_check() {
     done
 
     # git credential helper
-    local cred_helper
-    cred_helper=$(git config --global credential.helper 2>/dev/null || echo "not set")
-    if [[ "$cred_helper" == "osxkeychain" ]]; then
-        printf "  ${GREEN}✓${NC}  %-20s %s\n" "credential.helper" "osxkeychain"
+    local cred_helpers
+    cred_helpers=$(git config --global --get-all credential.helper 2>/dev/null | tr '\n' ' ' | sed 's/ $//')
+    if [[ -z "$cred_helpers" ]]; then cred_helpers="not set"; fi
+    if check_git_credential_helper; then
+        printf "  ${GREEN}✓${NC}  %-20s %s\n" "credential.helper" "$cred_helpers"
     else
-        printf "  ${YELLOW}○${NC}  %-20s %s\n" "credential.helper" "$cred_helper"
+        printf "  ${YELLOW}○${NC}  %-20s %s\n" "credential.helper" "$cred_helpers"
     fi
 
     # git.soma reachability
