@@ -5,7 +5,7 @@ A one-shot setup script for Salesforce employees to install and configure all to
 ## Quickstart
 
 ```bash
-curl -sSL https://git.soma.salesforce.com/john-hill/se-ai-macbook-setup/raw/main/se-ai-macbook-setup.sh | bash
+curl -sSL https://raw.githubusercontent.com/johnny2678/se-ai-macbook-setup/main/se-ai-macbook-setup.sh | bash
 ```
 
 Or run locally:
