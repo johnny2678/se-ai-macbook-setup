@@ -316,6 +316,28 @@ install_gh() {
 }
 
 # ============================================================================
+# HEROKU CLI
+# ============================================================================
+
+check_heroku() {
+    print_step "Checking Heroku CLI..."
+    explain "Deploy and manage apps on Heroku from the terminal."
+    if command -v heroku &>/dev/null; then
+        print_success "Heroku CLI $(heroku --version 2>/dev/null | head -1 || echo '(version unknown)')"
+        return 0
+    fi
+    print_warning "Heroku CLI not found"
+    return 1
+}
+
+install_heroku() {
+    print_info "Installing Heroku CLI via Homebrew..."
+    brew tap heroku/brew && brew install heroku
+    print_success "Heroku CLI installed"
+    print_info "Run 'heroku login' to authenticate"
+}
+
+# ============================================================================
 # CURL
 # ============================================================================
 
@@ -430,6 +452,28 @@ install_java() {
     brew install openjdk@21
     print_success "OpenJDK 21 installed"
     print_info "You may need to add it to PATH: export PATH=\"/opt/homebrew/opt/openjdk@21/bin:\$PATH\""
+}
+
+# ============================================================================
+# SALESFORCE CLI
+# ============================================================================
+
+check_sf() {
+    print_step "Checking Salesforce CLI..."
+    explain "Official Salesforce CLI (sf) — deploy metadata, run Apex, manage orgs."
+    if command -v sf &>/dev/null; then
+        print_success "Salesforce CLI $(sf --version 2>/dev/null | head -1 || echo '(version unknown)')"
+        return 0
+    fi
+    print_warning "Salesforce CLI not installed"
+    return 1
+}
+
+install_sf() {
+    print_info "Installing Salesforce CLI globally via npm..."
+    npm install -g @salesforce/cli
+    print_success "Salesforce CLI installed"
+    print_info "Run 'sf org login web' to authenticate to a Salesforce org"
 }
 
 # ============================================================================
@@ -743,6 +787,8 @@ run_health_check() {
         "node:node --version"
         "npm:npm --version"
         "claude:claude --version 2>/dev/null || echo '(run claude to authenticate)'"
+        "sf:sf --version 2>/dev/null | head -1"
+        "heroku:heroku --version 2>/dev/null | head -1"
         "gh:gh --version | head -1"
         "curl:curl --version | head -1 | awk '{print \$1\" \"\$2}'"
         "jq:jq --version"
@@ -848,6 +894,8 @@ main() {
     echo "════════════════════════════════════════════════"
 
     check_claude_code || { confirm "Install Claude Code (npm)?" && install_claude_code; }
+    check_sf          || { confirm "Install Salesforce CLI (npm)?" && install_sf; }
+    check_heroku      || { confirm "Install Heroku CLI?" && install_heroku; }
     check_uv          || { confirm "Install uv (Python package manager)?" && install_uv; }
     check_gh          || { confirm "Install GitHub CLI?" && install_gh; }
 
@@ -888,11 +936,14 @@ main() {
     echo "  2. Authenticate GitHub CLI (optional):"
     echo "       gh auth login"
     echo ""
-    echo "  3. Salesforce git access docs:"
+    echo "  3. Authenticate Salesforce CLI (optional):"
+    echo "       sf org login web"
+    echo ""
+    echo "  4. Salesforce git access docs:"
     echo "       docs/git-soma-setup.md"
     echo "       docs/git-emu-setup.md"
     echo ""
-    echo "  4. Restart your terminal (or source your shell config)"
+    echo "  5. Restart your terminal (or source your shell config)"
     echo "       source $(detect_shell_rc)"
     echo ""
 }
