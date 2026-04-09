@@ -455,7 +455,7 @@ function Install-Cursor {
     # Scoop's cursor package silently fails to place the exe in any discoverable location.
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         Print-Info "Installing Cursor via winget..."
-        & winget install --id Cursor.Cursor --silent --accept-package-agreements --accept-source-agreements
+        & winget install --id Anysphere.Cursor --silent --accept-package-agreements --accept-source-agreements
     } else {
         Print-Info "Installing Cursor via Scoop (winget not available)..."
         Ensure-ScoopBucket "extras"
