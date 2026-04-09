@@ -8,7 +8,9 @@
 #
 # Or run locally:
 #   chmod +x install.sh
-#   ./install.sh
+#   ./install.sh                          # full interactive setup
+#   ./install.sh cursor node git          # check/install specific components only
+#   ./install.sh --help                   # list available components
 #
 # ============================================================================
 set -euo pipefail
@@ -390,6 +392,52 @@ install_vscode() {
     print_info "Installing VS Code via Homebrew..."
     brew install --cask visual-studio-code
     print_success "VS Code installed"
+}
+
+# ============================================================================
+# OPTIONAL: Cursor editor
+# ============================================================================
+
+check_cursor() {
+    print_step "Checking Cursor..."
+    explain "AI-first code editor — supports Claude Code and Salesforce extensions."
+    if command -v cursor &>/dev/null || [[ -d "/Applications/Cursor.app" ]]; then
+        print_success "Cursor found"
+        return 0
+    fi
+    print_warning "Cursor not found"
+    return 1
+}
+
+install_cursor() {
+    print_info "Installing Cursor via Homebrew..."
+    brew install --cask cursor
+    print_success "Cursor installed"
+}
+
+# ============================================================================
+# OPTIONAL: Salesforce Extension Pack for Cursor
+# ============================================================================
+
+check_sf_extension_cursor() {
+    print_step "Checking Salesforce Extension Pack in Cursor..."
+    explain "Provides Apex, SOQL, LWC, and org management support inside Cursor."
+    if ! command -v cursor &>/dev/null; then
+        print_warning "cursor CLI not in PATH — open Cursor and run 'Install Shell Command' first"
+        return 1
+    fi
+    if cursor --list-extensions 2>/dev/null | grep -qi "salesforce.salesforcedx-vscode"; then
+        print_success "Salesforce Extension Pack found in Cursor"
+        return 0
+    fi
+    print_warning "Salesforce Extension Pack not installed in Cursor"
+    return 1
+}
+
+install_sf_extension_cursor() {
+    print_info "Installing Salesforce Extension Pack in Cursor..."
+    cursor --install-extension salesforce.salesforcedx-vscode
+    print_success "Salesforce Extension Pack installed in Cursor"
 }
 
 # ============================================================================
@@ -775,6 +823,9 @@ detect_shell_rc() {
 # ============================================================================
 
 run_health_check() {
+    # Optional args: canonical component names to filter by (show all if none given)
+    local filter=("$@")
+
     echo ""
     echo -e "${BOLD}Environment Status:${NC}"
     echo "────────────────────────────────────────────────"
@@ -793,12 +844,19 @@ run_health_check() {
         "curl:curl --version | head -1 | awk '{print \$1\" \"\$2}'"
         "jq:jq --version"
         "code:code --version | head -1"
+        "cursor:cursor --version 2>/dev/null | head -1"
         "java:java -version 2>&1 | head -1"
     )
 
     for entry in "${tools[@]}"; do
         local name="${entry%%:*}"
         local cmd="${entry#*:}"
+        # When a filter is active, skip tools not in the requested set
+        if [[ ${#filter[@]} -gt 0 ]]; then
+            local canonical
+            canonical=$(tool_to_component "$name")
+            in_array "$canonical" "${filter[@]}" || continue
+        fi
         if command -v "$name" &>/dev/null; then
             local ver
             ver=$(eval "$cmd" 2>/dev/null || echo "found")
@@ -808,24 +866,235 @@ run_health_check() {
         fi
     done
 
-    # git credential helper
-    local cred_helpers
-    cred_helpers=$(git config --global --get-all credential.helper 2>/dev/null | tr '\n' ' ' | sed 's/ $//')
-    if [[ -z "$cred_helpers" ]]; then cred_helpers="not set"; fi
-    if check_git_credential_helper; then
-        printf "  ${GREEN}✓${NC}  %-20s %s\n" "credential.helper" "$cred_helpers"
-    else
-        printf "  ${YELLOW}○${NC}  %-20s %s\n" "credential.helper" "$cred_helpers"
-    fi
+    # git credential helper & git.soma — only in full mode (no filter)
+    if [[ ${#filter[@]} -eq 0 ]]; then
+        local cred_helpers
+        cred_helpers=$(git config --global --get-all credential.helper 2>/dev/null | tr '\n' ' ' | sed 's/ $//')
+        if [[ -z "$cred_helpers" ]]; then cred_helpers="not set"; fi
+        if check_git_credential_helper; then
+            printf "  ${GREEN}✓${NC}  %-20s %s\n" "credential.helper" "$cred_helpers"
+        else
+            printf "  ${YELLOW}○${NC}  %-20s %s\n" "credential.helper" "$cred_helpers"
+        fi
 
-    # git.soma reachability
-    if check_soma_reachable; then
-        printf "  ${GREEN}✓${NC}  %-20s %s\n" "git.soma" "reachable"
-    else
-        printf "  ${YELLOW}○${NC}  %-20s %s\n" "git.soma" "not reachable (needs IIQ access)"
+        if check_soma_reachable; then
+            printf "  ${GREEN}✓${NC}  %-20s %s\n" "git.soma" "reachable"
+        else
+            printf "  ${YELLOW}○${NC}  %-20s %s\n" "git.soma" "not reachable (needs IIQ access)"
+        fi
     fi
 
     echo "────────────────────────────────────────────────"
+}
+
+# ============================================================================
+# TARGETED MODE — helpers and dispatcher
+# ============================================================================
+
+# Map health-check command name to canonical component name
+tool_to_component() {
+    case "$1" in
+        python3) echo "python" ;;
+        npm)     echo "node" ;;
+        code)    echo "vscode" ;;
+        *)       echo "$1" ;;
+    esac
+}
+
+# All canonical component names in dependency-safe order
+ALL_COMPONENTS=(curl xcode brew git python node uv claude sf heroku gh jq java vscode cursor sf-extension-cursor ghostty)
+
+# Bash-3-compatible array membership test
+in_array() {
+    local needle="$1"; shift
+    local elem
+    for elem in "$@"; do [[ "$elem" == "$needle" ]] && return 0; done
+    return 1
+}
+
+# Map user-friendly aliases to canonical component names
+normalize_component() {
+    case "$1" in
+        homebrew)                                   echo "brew" ;;
+        xcode-clt|xcode-tools)                      echo "xcode" ;;
+        python3)                                    echo "python" ;;
+        nodejs)                                     echo "node" ;;
+        claude-code)                                echo "claude" ;;
+        salesforce|salesforce-cli)                  echo "sf" ;;
+        github-cli|github)                          echo "gh" ;;
+        heroku-cli)                                 echo "heroku" ;;
+        vs-code|code)                               echo "vscode" ;;
+        sf-extension|salesforce-extension-cursor|sf-ext) echo "sf-extension-cursor" ;;
+        *)                                          echo "$1" ;;
+    esac
+}
+
+# Return space-separated direct dependencies for a canonical component
+deps_of() {
+    case "$1" in
+        xcode)               echo "curl" ;;
+        brew)                echo "xcode" ;;
+        git|python|uv|gh|heroku|jq|java|vscode|cursor|ghostty|node) echo "brew" ;;
+        claude|sf)           echo "node" ;;
+        sf-extension-cursor) echo "cursor" ;;
+        *)                   echo "" ;;
+    esac
+}
+
+# Human-readable label for install prompts
+label_of() {
+    case "$1" in
+        xcode)               echo "Xcode Command Line Tools" ;;
+        brew)                echo "Homebrew" ;;
+        git)                 echo "Git" ;;
+        python)              echo "Python 3.12" ;;
+        node)                echo "Node.js" ;;
+        uv)                  echo "uv (Python package manager)" ;;
+        claude)              echo "Claude Code (npm)" ;;
+        sf)                  echo "Salesforce CLI (npm)" ;;
+        heroku)              echo "Heroku CLI" ;;
+        gh)                  echo "GitHub CLI" ;;
+        jq)                  echo "jq (JSON processor)" ;;
+        java)                echo "Java 21 (OpenJDK)" ;;
+        vscode)              echo "VS Code" ;;
+        cursor)              echo "Cursor" ;;
+        sf-extension-cursor) echo "Salesforce Extension Pack for Cursor" ;;
+        ghostty)             echo "Ghostty terminal" ;;
+        *)                   echo "$1" ;;
+    esac
+}
+
+# Dispatch check to the appropriate check_* function
+check_component() {
+    case "$1" in
+        curl)                check_curl ;;
+        xcode)               check_xcode_tools ;;
+        brew)                check_homebrew ;;
+        git)                 check_git ;;
+        python)              check_python ;;
+        node)                check_node ;;
+        uv)                  check_uv ;;
+        claude)              check_claude_code ;;
+        sf)                  check_sf ;;
+        heroku)              check_heroku ;;
+        gh)                  check_gh ;;
+        jq)                  check_jq ;;
+        java)                check_java ;;
+        vscode)              check_vscode ;;
+        cursor)              check_cursor ;;
+        sf-extension-cursor) check_sf_extension_cursor ;;
+        ghostty)             check_ghostty ;;
+        *) print_error "Unknown component: $1"; return 1 ;;
+    esac
+}
+
+# Dispatch install to the appropriate install_* function
+install_component() {
+    case "$1" in
+        curl)                return 0 ;;  # no installer; script errors if curl missing
+        xcode)               install_xcode_tools ;;
+        brew)                install_homebrew ;;
+        git)                 install_git ;;
+        python)              install_python ;;
+        node)                install_node ;;
+        uv)                  install_uv ;;
+        claude)              install_claude_code ;;
+        sf)                  install_sf ;;
+        heroku)              install_heroku ;;
+        gh)                  install_gh ;;
+        jq)                  install_jq ;;
+        java)                install_java ;;
+        vscode)              install_vscode ;;
+        cursor)              install_cursor ;;
+        sf-extension-cursor) install_sf_extension_cursor ;;
+        ghostty)             install_ghostty ;;
+    esac
+}
+
+# Global set populated by add_with_deps
+NEEDED=()
+
+# Recursively expand a component and its dependencies into NEEDED
+add_with_deps() {
+    local comp="$1"
+    in_array "$comp" "${NEEDED[@]:-}" && return
+    local dep
+    for dep in $(deps_of "$comp"); do
+        add_with_deps "$dep"
+    done
+    NEEDED+=("$comp")
+}
+
+run_targeted() {
+    if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+        echo "Usage: $0 [component ...]"
+        echo ""
+        echo "  Checks (and optionally installs) only the specified components,"
+        echo "  automatically including any required dependencies."
+        echo ""
+        echo "  Run with no arguments to step through the full interactive setup."
+        echo ""
+        echo "  Components:"
+        echo "    curl  xcode  brew  git  python  node  uv  claude  sf  heroku"
+        echo "    gh    jq     java  vscode  cursor  sf-extension-cursor  ghostty"
+        echo ""
+        echo "  Aliases:"
+        echo "    homebrew, xcode-clt, python3, nodejs, claude-code,"
+        echo "    salesforce, salesforce-cli, github-cli, heroku-cli,"
+        echo "    vs-code, sf-extension, sf-ext"
+        echo ""
+        return 0
+    fi
+
+    local arch
+    arch=$(detect_arch)
+    echo -e "${BOLD}System Info:${NC}"
+    echo "  macOS $(sw_vers -productVersion)  |  arch: $arch"
+    echo ""
+
+    # Normalize and validate each argument
+    local requested=()
+    local arg canonical
+    for arg in "$@"; do
+        canonical=$(normalize_component "$arg")
+        if ! in_array "$canonical" "${ALL_COMPONENTS[@]}"; then
+            print_error "Unknown component: '$arg'"
+            echo "  Run '$0 --help' for the list of valid components."
+            exit 1
+        fi
+        requested+=("$canonical")
+    done
+
+    # Expand all deps into NEEDED (global, reset each call)
+    NEEDED=()
+    local comp
+    for comp in "${requested[@]}"; do
+        add_with_deps "$comp"
+    done
+
+    # Report what will run, flagging auto-added dependencies
+    echo -e "${BOLD}Checking:${NC} ${requested[*]}"
+    local auto_added=()
+    for comp in "${NEEDED[@]}"; do
+        in_array "$comp" "${requested[@]}" || auto_added+=("$comp")
+    done
+    if [[ ${#auto_added[@]} -gt 0 ]]; then
+        echo -e "${DIM}  + dependencies: ${auto_added[*]}${NC}"
+    fi
+    echo "════════════════════════════════════════════════"
+
+    # Process components in canonical (dependency-safe) order
+    for comp in "${ALL_COMPONENTS[@]}"; do
+        in_array "$comp" "${NEEDED[@]}" || continue
+        if [[ "$comp" == "curl" ]]; then
+            check_curl || { print_error "curl is required but not found"; exit 1; }
+            continue
+        fi
+        check_component "$comp" || { confirm "Install $(label_of "$comp")?" "y" && install_component "$comp"; }
+    done
+
+    echo ""
+    run_health_check "${NEEDED[@]}"
 }
 
 # ============================================================================
@@ -834,6 +1103,12 @@ run_health_check() {
 
 main() {
     print_banner
+
+    # Targeted mode: if any arguments are passed, only check/install those components
+    if [[ "$#" -gt 0 ]]; then
+        run_targeted "$@"
+        return
+    fi
 
     local arch
     arch=$(detect_arch)
@@ -909,6 +1184,10 @@ main() {
     check_jq       || { confirm "Install jq (JSON processor)?" "n" && install_jq; }
     check_java     || { confirm "Install Java 21 (OpenJDK)?" "n" && install_java; }
     check_vscode   || { confirm "Install VS Code?" "n" && install_vscode; }
+    check_cursor   || { confirm "Install Cursor?" "n" && install_cursor; }
+    if command -v cursor &>/dev/null || [[ -d "/Applications/Cursor.app" ]]; then
+        check_sf_extension_cursor || { confirm "Install Salesforce Extension Pack for Cursor?" "n" && install_sf_extension_cursor; }
+    fi
     check_ghostty  || { confirm "Install Ghostty terminal?" "n" && install_ghostty; }
 
     # ─────────────────────────────────────────────────────────────────────
