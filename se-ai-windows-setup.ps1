@@ -386,17 +386,34 @@ function Install-VsCode {
 # Scoop creates cursor.cmd in ~\scoop\shims\ but Get-Command may not reflect
 # it immediately in the current session after install.
 function Find-Cursor {
+    # 1. PATH (may be stale in current session — try anyway)
     $cmd = Get-Command cursor -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
+
+    # 2. Scoop shims — all extensions
     $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { "$env:USERPROFILE\scoop" }
-    $candidates = @(
-        "$scoopRoot\shims\cursor.cmd",
-        "$scoopRoot\shims\cursor.ps1",
-        "$scoopRoot\apps\cursor\current\Cursor.exe",
+    foreach ($ext in '.cmd', '.ps1', '.exe', '') {
+        $p = "$scoopRoot\shims\cursor$ext"
+        if (Test-Path $p) { return $p }
+    }
+
+    # 3. Scoop apps — recursive search under any cursor-named subdir
+    $appsRoot = "$scoopRoot\apps"
+    if (Test-Path $appsRoot) {
+        $exe = Get-ChildItem $appsRoot -Directory -ErrorAction SilentlyContinue |
+               Where-Object { $_.Name -like '*cursor*' } |
+               ForEach-Object { Get-ChildItem $_.FullName -Filter 'Cursor.exe' -Recurse -ErrorAction SilentlyContinue } |
+               Select-Object -First 1
+        if ($exe) { return $exe.FullName }
+    }
+
+    # 4. Standard NSIS/Squirrel installer locations
+    foreach ($p in @(
+        "$env:LOCALAPPDATA\Programs\Cursor\Cursor.exe",
         "$env:LOCALAPPDATA\Programs\cursor\Cursor.exe",
-        "$env:LOCALAPPDATA\Programs\Cursor\Cursor.exe"
-    )
-    foreach ($p in $candidates) { if (Test-Path $p) { return $p } }
+        "$env:APPDATA\Local\Programs\Cursor\Cursor.exe"
+    )) { if (Test-Path $p) { return $p } }
+
     return $null
 }
 
@@ -416,7 +433,22 @@ function Install-Cursor {
     Ensure-ScoopBucket "extras"
     & scoop install cursor
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
-    Print-Success "Cursor installed"
+
+    # Cursor uses an NSIS/Squirrel installer that may run asynchronously.
+    # Poll up to 30s for the executable to appear before continuing.
+    $waited = 0
+    while (-not (Find-Cursor) -and $waited -lt 30) {
+        Start-Sleep -Seconds 2
+        $waited += 2
+    }
+
+    if (Find-Cursor) {
+        Print-Success "Cursor installed"
+    } else {
+        Print-Warning "Cursor installed but executable not yet found — restart terminal and re-run to install the Salesforce extension"
+        $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { "$env:USERPROFILE\scoop" }
+        Write-Host "    Searched: $scoopRoot\shims\, $scoopRoot\apps\*cursor*, %LOCALAPPDATA%\Programs\Cursor\" -ForegroundColor DarkGray
+    }
 }
 
 # ============================================================================
