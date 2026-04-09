@@ -386,33 +386,55 @@ function Install-VsCode {
 # Scoop creates cursor.cmd in ~\scoop\shims\ but Get-Command may not reflect
 # it immediately in the current session after install.
 function Find-Cursor {
-    # 1. PATH (may be stale in current session — try anyway)
+    # 1. PATH (fastest, but may be stale after install)
     $cmd = Get-Command cursor -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
 
-    # 2. Scoop shims — all extensions
+    # 2. Windows registry — most reliable for any installer
+    foreach ($regRoot in @(
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
+    )) {
+        $entry = Get-ChildItem $regRoot -ErrorAction SilentlyContinue |
+                 Get-ItemProperty -ErrorAction SilentlyContinue |
+                 Where-Object { $_.DisplayName -like '*Cursor*' } |
+                 Select-Object -First 1
+        if ($entry) {
+            # Try DisplayIcon (usually points to the .exe)
+            if ($entry.DisplayIcon) {
+                $icon = ($entry.DisplayIcon -replace '"','') -replace ',\d*$',''
+                if ($icon -match '\.exe$' -and (Test-Path $icon)) { return $icon }
+            }
+            # Try InstallLocation
+            if ($entry.InstallLocation) {
+                $exe = Join-Path $entry.InstallLocation 'Cursor.exe'
+                if (Test-Path $exe) { return $exe }
+                $exe = Get-ChildItem $entry.InstallLocation -Filter 'cursor.exe' -Recurse -Depth 2 -ErrorAction SilentlyContinue |
+                       Select-Object -First 1
+                if ($exe) { return $exe.FullName }
+            }
+        }
+    }
+
+    # 3. Scoop shims — all extensions
     $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { "$env:USERPROFILE\scoop" }
     foreach ($ext in '.cmd', '.ps1', '.exe', '') {
         $p = "$scoopRoot\shims\cursor$ext"
         if (Test-Path $p) { return $p }
     }
 
-    # 3. Scoop apps — recursive search under any cursor-named subdir
-    $appsRoot = "$scoopRoot\apps"
-    if (Test-Path $appsRoot) {
-        $exe = Get-ChildItem $appsRoot -Directory -ErrorAction SilentlyContinue |
-               Where-Object { $_.Name -like '*cursor*' } |
-               ForEach-Object { Get-ChildItem $_.FullName -Filter 'Cursor.exe' -Recurse -ErrorAction SilentlyContinue } |
-               Select-Object -First 1
-        if ($exe) { return $exe.FullName }
-    }
+    # 4. Scoop apps — recursive search
+    $exe = Get-ChildItem "$scoopRoot\apps" -Directory -ErrorAction SilentlyContinue |
+           Where-Object { $_.Name -like '*cursor*' } |
+           ForEach-Object { Get-ChildItem $_.FullName -Filter 'cursor.exe' -Recurse -ErrorAction SilentlyContinue } |
+           Select-Object -First 1
+    if ($exe) { return $exe.FullName }
 
-    # 4. Standard NSIS/Squirrel installer locations
-    foreach ($p in @(
-        "$env:LOCALAPPDATA\Programs\Cursor\Cursor.exe",
-        "$env:LOCALAPPDATA\Programs\cursor\Cursor.exe",
-        "$env:APPDATA\Local\Programs\Cursor\Cursor.exe"
-    )) { if (Test-Path $p) { return $p } }
+    # 5. LOCALAPPDATA\Programs (NSIS/Squirrel default for user-scope installs)
+    $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Filter 'cursor.exe' -Recurse -Depth 3 -ErrorAction SilentlyContinue |
+           Select-Object -First 1
+    if ($exe) { return $exe.FullName }
 
     return $null
 }
@@ -432,22 +454,37 @@ function Install-Cursor {
     Print-Info "Installing Cursor via Scoop..."
     Ensure-ScoopBucket "extras"
     & scoop install cursor
+    $scoopExit = $LASTEXITCODE
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
 
-    # Cursor uses an NSIS/Squirrel installer that may run asynchronously.
-    # Poll up to 30s for the executable to appear before continuing.
+    # Cursor's installer may be async (NSIS/Squirrel). Poll up to 30s.
     $waited = 0
     while (-not (Find-Cursor) -and $waited -lt 30) {
         Start-Sleep -Seconds 2
         $waited += 2
     }
 
-    if (Find-Cursor) {
-        Print-Success "Cursor installed"
+    $found = Find-Cursor
+    if ($found) {
+        Print-Success "Cursor installed: $found"
     } else {
-        Print-Warning "Cursor installed but executable not yet found — restart terminal and re-run to install the Salesforce extension"
-        $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { "$env:USERPROFILE\scoop" }
-        Write-Host "    Searched: $scoopRoot\shims\, $scoopRoot\apps\*cursor*, %LOCALAPPDATA%\Programs\Cursor\" -ForegroundColor DarkGray
+        if ($scoopExit -and $scoopExit -ne 0) {
+            Print-Error "Scoop install failed (exit $scoopExit) — Cursor was not installed"
+        } else {
+            Print-Warning "Cursor installer ran but executable not found after 30s"
+        }
+        # Diagnostic: show what scoop knows and what registry says
+        $scoopWhich = & scoop which cursor 2>&1 | Select-Object -First 1
+        Write-Host "    scoop which cursor: $scoopWhich" -ForegroundColor DarkGray
+        $regEntry = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' -ErrorAction SilentlyContinue |
+                    Get-ItemProperty -ErrorAction SilentlyContinue |
+                    Where-Object { $_.DisplayName -like '*Cursor*' } |
+                    Select-Object DisplayName, InstallLocation, DisplayIcon -First 1
+        if ($regEntry) {
+            Write-Host "    Registry: $($regEntry.DisplayName) @ $($regEntry.InstallLocation)" -ForegroundColor DarkGray
+        } else {
+            Write-Host "    Registry: no Cursor entry found in HKCU Uninstall" -ForegroundColor DarkGray
+        }
     }
 }
 
