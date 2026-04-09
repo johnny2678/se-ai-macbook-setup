@@ -38,10 +38,18 @@ cd se-ai-macbook-setup
 Install only specific components (dependencies are resolved automatically):
 
 ```bash
-# macOS
-./se-ai-macbook-setup.sh node git claude
+# macOS — one-liner
+curl -sSL https://raw.githubusercontent.com/johnny2678/se-ai-macbook-setup/main/se-ai-macbook-setup.sh | bash -s -- node git claude
 
-# Windows
+# macOS — local
+./se-ai-macbook-setup.sh node git claude
+```
+
+```powershell
+# Windows — one-liner
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/johnny2678/se-ai-macbook-setup/main/se-ai-windows-setup.ps1))) node git claude
+
+# Windows — local
 .\se-ai-windows-setup.ps1 node git claude
 ```
 
