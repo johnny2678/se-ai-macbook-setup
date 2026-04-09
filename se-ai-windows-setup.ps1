@@ -18,7 +18,7 @@ param(
     [string[]]$Components
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 
 # ============================================================================
 # CONFIGURATION
@@ -1068,4 +1068,13 @@ function Main {
     Write-Host ""
 }
 
-Main
+try {
+    Main
+} catch {
+    Write-Host ""
+    Write-Host "  [FATAL] Script crashed: $_" -ForegroundColor Red
+    Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray
+}
+Write-Host ""
+Write-Host "  [DEBUG] Script finished. Press Enter to close." -ForegroundColor DarkYellow
+Read-Host
