@@ -20,6 +20,19 @@ param(
 
 $ErrorActionPreference = "Continue"
 
+# DEBUG: catch any terminating error at the scriptblock scope
+trap {
+    Write-Host ""
+    Write-Host "  [TRAP] Unhandled error: $_" -ForegroundColor Red
+    Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  Press Enter to close." -ForegroundColor DarkYellow
+    Read-Host
+    break
+}
+
+Write-Host "[DEBUG] Script body starting..." -ForegroundColor DarkYellow
+
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
@@ -1068,6 +1081,7 @@ function Main {
     Write-Host ""
 }
 
+Write-Host "[DEBUG] Initialization complete, calling Main..." -ForegroundColor DarkYellow
 try {
     Main
 } catch {
