@@ -78,11 +78,8 @@ function Detect-Arch {
     }
 }
 
-# Ensure Windows
-if ($env:OS -ne "Windows_NT") {
-    Write-Host "This script is for Windows only."
-    exit 1
-}
+# Ensure Windows — checked inside Main so 'exit' doesn't kill the terminal
+# when script is run via & ([scriptblock]::Create(...))
 
 # ============================================================================
 # SCOOP
@@ -251,7 +248,7 @@ function Check-ClaudeCode {
     Print-Step "Checking Claude Code..."
     Explain "Anthropic's AI coding assistant CLI."
     if (Get-Command claude -ErrorAction SilentlyContinue) {
-        $ver = & claude --version 2>$null
+        $ver = & claude --version 2>$null 6>$null | Where-Object { $_ -notmatch '^\s*WARN\s' } | Select-Object -First 1
         if (-not $ver) { $ver = "(version unknown)" }
         Print-Success "Claude Code $ver"
         return $true
@@ -708,7 +705,7 @@ function Run-HealthCheck {
         @{ Name = "uv";      Canonical = "uv";     Cmd = { & uv --version 2>$null } }
         @{ Name = "node";    Canonical = "node";   Cmd = { & node --version 2>$null } }
         @{ Name = "npm";     Canonical = "node";   Cmd = { & npm --version 2>$null } }
-        @{ Name = "claude";  Canonical = "claude"; Cmd = { $v = & claude --version 2>$null; if ($v) { $v } else { "(run claude to authenticate)" } } }
+        @{ Name = "claude";  Canonical = "claude"; Cmd = { $v = & claude --version 2>$null 6>$null | Where-Object { $_ -notmatch '^\s*WARN\s' } | Select-Object -First 1; if ($v) { $v } else { "(run claude to authenticate)" } } }
         @{ Name = "sf";      Canonical = "sf";     Cmd = { & sf --version 2>$null | Select-Object -First 1 } }
         @{ Name = "heroku";  Canonical = "heroku"; Cmd = { & heroku --version 2>$null | Select-Object -First 1 } }
         @{ Name = "gh";      Canonical = "gh";     Cmd = { & gh --version 2>$null | Select-Object -First 1 } }
@@ -907,9 +904,8 @@ function Run-Targeted {
     foreach ($arg in $RequestedComponents) {
         $canonical = Normalize-Component $arg
         if ($canonical -notin $ALL_COMPONENTS) {
-            Print-Error "Unknown component: '$arg'"
-            Write-Host "    Run '.\se-ai-windows-setup.ps1 -Help' for the list of valid components."
-            exit 1
+            Print-Warning "Unknown component '$arg' — skipping. Run -Help for the list of valid components."
+            continue
         }
         $requested += $canonical
     }
@@ -934,7 +930,7 @@ function Run-Targeted {
         if ($comp -eq "curl") {
             if (-not (Check-Curl)) {
                 Print-Error "curl is required but not found"
-                exit 1
+                return
             }
             continue
         }
@@ -953,6 +949,11 @@ function Run-Targeted {
 # ============================================================================
 
 function Main {
+    if ($env:OS -ne "Windows_NT") {
+        Write-Host "This script is for Windows only."
+        return
+    }
+
     Print-Banner
 
     if ($Help) {
@@ -982,7 +983,7 @@ function Main {
 
     if (-not (Check-Curl)) {
         Print-Error "curl is required"
-        exit 1
+        return
     }
 
     if (-not (Check-Scoop)) {
@@ -990,7 +991,7 @@ function Main {
             Install-Scoop
         } else {
             Print-Error "Scoop is required to install remaining tools"
-            exit 1
+            return
         }
     }
 
