@@ -509,7 +509,7 @@ function Install-SfExtensionCursor {
         Print-Error "Cursor not found — cannot install extension"
         return
     }
-    & $cursorExe --install-extension salesforce.salesforcedx-vscode
+    & $cursorExe --install-extension salesforce.salesforcedx-vscode 2>$null
     Print-Success "Salesforce Extension Pack installed"
 }
 
@@ -824,8 +824,8 @@ function Run-HealthCheck {
         @{ Name = "curl";    Canonical = "curl";   Cmd = { $v = & curl.exe --version 2>$null | Select-Object -First 1; if ($v -match 'curl\s+(\S+)') { "curl $($Matches[1])" } else { "found" } } }
         @{ Name = "jq";      Canonical = "jq";     Cmd = { & jq --version 2>$null } }
         @{ Name = "code";    Canonical = "vscode"; Cmd = { & code --version 2>$null | Select-Object -First 1 } }
-        @{ Name = "cursor";              Canonical = "cursor";              Cmd = { $c = Find-Cursor; if ($c) { & $c --version 2>$null | Select-Object -First 1 } else { $null } } }
-        @{ Name = "sf-extension-cursor"; Canonical = "sf-extension-cursor"; Cmd = { $c = Find-Cursor; if ($c) { $x = & $c --list-extensions 2>$null; if ($x -match 'salesforce\.salesforcedx-vscode') { "installed" } else { $null } } else { $null } } }
+        @{ Name = "cursor";              Canonical = "cursor";              NoCmd = $true; Cmd = { $c = Find-Cursor; if ($c) { & $c --version 2>$null | Select-Object -First 1 } else { $null } } }
+        @{ Name = "sf-extension-cursor"; Canonical = "sf-extension-cursor"; NoCmd = $true; Cmd = { $c = Find-Cursor; if ($c) { $x = & $c --list-extensions 2>$null; if ($x -match 'salesforce\.salesforcedx-vscode') { "installed" } else { $null } } else { $null } } }
         @{ Name = "java";                Canonical = "java";                Cmd = { & java -version 2>&1 | Select-Object -First 1 } }
     )
 
@@ -835,10 +835,15 @@ function Run-HealthCheck {
             continue
         }
 
-        $cmd = Get-Command $tool.Name -ErrorAction SilentlyContinue
-        # Special case: use curl.exe for curl to avoid PowerShell alias
-        if ($tool.Name -eq "curl") {
-            $cmd = Get-Command "curl.exe" -ErrorAction SilentlyContinue
+        # NoCmd tools (e.g. sf-extension-cursor, cursor) use Find-Cursor internally
+        # and don't have a real command name to test with Get-Command.
+        if ($tool.NoCmd) {
+            $cmd = $true
+        } else {
+            $cmd = Get-Command $tool.Name -ErrorAction SilentlyContinue
+            if ($tool.Name -eq "curl") {
+                $cmd = Get-Command "curl.exe" -ErrorAction SilentlyContinue
+            }
         }
 
         if ($cmd) {
@@ -1066,11 +1071,30 @@ function Run-Targeted {
 # MAIN
 # ============================================================================
 
+function Repair-ScoopClaudeShim {
+    # The Scoop shim for claude (if created by a failed 'scoop install claude') calls
+    # back into 'scoop claude', generating a WARN on every scoop operation.
+    # The real claude is installed via npm and its shim calls node, not scoop.
+    # Detect and remove the bad shim automatically.
+    $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { "$env:USERPROFILE\scoop" }
+    foreach ($ext in '.cmd', '.ps1', '.shim') {
+        $shim = "$scoopRoot\shims\claude$ext"
+        if (Test-Path $shim) {
+            $content = Get-Content $shim -Raw -ErrorAction SilentlyContinue
+            if ($content -match '\bscoop\b' -and $content -notmatch '\bnode\b') {
+                Remove-Item $shim -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
 function Main {
     if ($env:OS -ne "Windows_NT") {
         Write-Host "This script is for Windows only."
         return
     }
+
+    Repair-ScoopClaudeShim
 
     Print-Banner
 
