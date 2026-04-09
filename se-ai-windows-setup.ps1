@@ -382,11 +382,28 @@ function Install-VsCode {
 # OPTIONAL: Cursor editor
 # ============================================================================
 
+# Finds the cursor executable regardless of whether it's on PATH yet.
+# Scoop creates cursor.cmd in ~\scoop\shims\ but Get-Command may not reflect
+# it immediately in the current session after install.
+function Find-Cursor {
+    $cmd = Get-Command cursor -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    $scoopRoot = if ($env:SCOOP) { $env:SCOOP } else { "$env:USERPROFILE\scoop" }
+    $candidates = @(
+        "$scoopRoot\shims\cursor.cmd",
+        "$scoopRoot\shims\cursor.ps1",
+        "$scoopRoot\apps\cursor\current\Cursor.exe",
+        "$env:LOCALAPPDATA\Programs\cursor\Cursor.exe",
+        "$env:LOCALAPPDATA\Programs\Cursor\Cursor.exe"
+    )
+    foreach ($p in $candidates) { if (Test-Path $p) { return $p } }
+    return $null
+}
+
 function Check-Cursor {
     Print-Step "Checking Cursor..."
     Explain "AI-first code editor — supports Claude Code and Salesforce extensions."
-    if ((Get-Command cursor -ErrorAction SilentlyContinue) -or
-        (Test-Path "$env:LOCALAPPDATA\Programs\Cursor\cursor.exe")) {
+    if (Find-Cursor) {
         Print-Success "Cursor found"
         return $true
     }
@@ -409,11 +426,12 @@ function Install-Cursor {
 function Check-SfExtensionCursor {
     Print-Step "Checking Salesforce Extension Pack (Cursor)..."
     Explain "Apex, metadata, org management — Salesforce tooling inside Cursor."
-    if (-not (Get-Command cursor -ErrorAction SilentlyContinue)) {
-        Print-Warning "Cursor not in PATH — skipping Salesforce extension check"
+    $cursorExe = Find-Cursor
+    if (-not $cursorExe) {
+        Print-Warning "Cursor not installed — skipping Salesforce extension check"
         return $false
     }
-    $exts = & cursor --list-extensions 2>$null
+    $exts = & $cursorExe --list-extensions 2>$null
     if ($exts -match 'salesforce\.salesforcedx-vscode') {
         Print-Success "Salesforce Extension Pack installed in Cursor"
         return $true
@@ -424,7 +442,12 @@ function Check-SfExtensionCursor {
 
 function Install-SfExtensionCursor {
     Print-Info "Installing Salesforce Extension Pack in Cursor..."
-    & cursor --install-extension salesforce.salesforcedx-vscode
+    $cursorExe = Find-Cursor
+    if (-not $cursorExe) {
+        Print-Error "Cursor not found — cannot install extension"
+        return
+    }
+    & $cursorExe --install-extension salesforce.salesforcedx-vscode
     Print-Success "Salesforce Extension Pack installed"
 }
 
@@ -739,8 +762,8 @@ function Run-HealthCheck {
         @{ Name = "curl";    Canonical = "curl";   Cmd = { $v = & curl.exe --version 2>$null | Select-Object -First 1; if ($v -match 'curl\s+(\S+)') { "curl $($Matches[1])" } else { "found" } } }
         @{ Name = "jq";      Canonical = "jq";     Cmd = { & jq --version 2>$null } }
         @{ Name = "code";    Canonical = "vscode"; Cmd = { & code --version 2>$null | Select-Object -First 1 } }
-        @{ Name = "cursor";              Canonical = "cursor";              Cmd = { & cursor --version 2>$null | Select-Object -First 1 } }
-        @{ Name = "sf-extension-cursor"; Canonical = "sf-extension-cursor"; Cmd = { $exts = & cursor --list-extensions 2>$null; if ($exts -match 'salesforce\.salesforcedx-vscode') { "installed" } else { $null } } }
+        @{ Name = "cursor";              Canonical = "cursor";              Cmd = { $c = Find-Cursor; if ($c) { & $c --version 2>$null | Select-Object -First 1 } else { $null } } }
+        @{ Name = "sf-extension-cursor"; Canonical = "sf-extension-cursor"; Cmd = { $c = Find-Cursor; if ($c) { $x = & $c --list-extensions 2>$null; if ($x -match 'salesforce\.salesforcedx-vscode') { "installed" } else { $null } } else { $null } } }
         @{ Name = "java";                Canonical = "java";                Cmd = { & java -version 2>&1 | Select-Object -First 1 } }
     )
 
@@ -1063,7 +1086,7 @@ function Main {
     if (-not (Check-Java))    { if (Confirm-Action "Install Java 21 (OpenJDK)?" "n")    { Install-Java } }
     if (-not (Check-VsCode))  { if (Confirm-Action "Install VS Code?" "n")              { Install-VsCode } }
     if (-not (Check-Cursor))  { if (Confirm-Action "Install Cursor?" "n")               { Install-Cursor } }
-    if (Get-Command cursor -ErrorAction SilentlyContinue) {
+    if (Find-Cursor) {
         if (-not (Check-SfExtensionCursor)) { if (Confirm-Action "Install Salesforce Extension Pack for Cursor?" "n") { Install-SfExtensionCursor } }
     }
     if (-not (Check-Ghostty)) { if (Confirm-Action "Install Ghostty terminal?" "n")     { Install-Ghostty } }
