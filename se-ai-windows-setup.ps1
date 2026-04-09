@@ -20,19 +20,6 @@ param(
 
 $ErrorActionPreference = "Continue"
 
-# DEBUG: catch any terminating error at the scriptblock scope
-trap {
-    Write-Host ""
-    Write-Host "  [TRAP] Unhandled error: $_" -ForegroundColor Red
-    Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray
-    Write-Host ""
-    Write-Host "  Press Enter to close." -ForegroundColor DarkYellow
-    Read-Host
-    break
-}
-
-Write-Host "[DEBUG] Script body starting..." -ForegroundColor DarkYellow
-
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
@@ -102,7 +89,7 @@ function Check-Scoop {
     Print-Step "Checking Scoop..."
     Explain "Package manager for Windows — the foundation for all other installs."
     if (Get-Command scoop -ErrorAction SilentlyContinue) {
-        $ver = & scoop --version 2>$null | Select-Object -First 1
+        $ver = & scoop --version 2>$null | Where-Object { $_ -notmatch '^\s*WARN\s+scoop' } | Select-Object -First 1
         Print-Success "Scoop $ver"
         return $true
     }
@@ -411,7 +398,34 @@ function Install-Cursor {
     Print-Info "Installing Cursor via Scoop..."
     Ensure-ScoopBucket "extras"
     & scoop install cursor
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
     Print-Success "Cursor installed"
+}
+
+# ============================================================================
+# SALESFORCE EXTENSION PACK (CURSOR)
+# ============================================================================
+
+function Check-SfExtensionCursor {
+    Print-Step "Checking Salesforce Extension Pack (Cursor)..."
+    Explain "Apex, metadata, org management — Salesforce tooling inside Cursor."
+    if (-not (Get-Command cursor -ErrorAction SilentlyContinue)) {
+        Print-Warning "Cursor not in PATH — skipping Salesforce extension check"
+        return $false
+    }
+    $exts = & cursor --list-extensions 2>$null
+    if ($exts -match 'salesforce\.salesforcedx-vscode') {
+        Print-Success "Salesforce Extension Pack installed in Cursor"
+        return $true
+    }
+    Print-Warning "Salesforce Extension Pack not installed in Cursor"
+    return $false
+}
+
+function Install-SfExtensionCursor {
+    Print-Info "Installing Salesforce Extension Pack in Cursor..."
+    & cursor --install-extension salesforce.salesforcedx-vscode
+    Print-Success "Salesforce Extension Pack installed"
 }
 
 # ============================================================================
@@ -725,8 +739,9 @@ function Run-HealthCheck {
         @{ Name = "curl";    Canonical = "curl";   Cmd = { $v = & curl.exe --version 2>$null | Select-Object -First 1; if ($v -match 'curl\s+(\S+)') { "curl $($Matches[1])" } else { "found" } } }
         @{ Name = "jq";      Canonical = "jq";     Cmd = { & jq --version 2>$null } }
         @{ Name = "code";    Canonical = "vscode"; Cmd = { & code --version 2>$null | Select-Object -First 1 } }
-        @{ Name = "cursor";  Canonical = "cursor"; Cmd = { & cursor --version 2>$null | Select-Object -First 1 } }
-        @{ Name = "java";    Canonical = "java";   Cmd = { & java -version 2>&1 | Select-Object -First 1 } }
+        @{ Name = "cursor";              Canonical = "cursor";              Cmd = { & cursor --version 2>$null | Select-Object -First 1 } }
+        @{ Name = "sf-extension-cursor"; Canonical = "sf-extension-cursor"; Cmd = { $exts = & cursor --list-extensions 2>$null; if ($exts -match 'salesforce\.salesforcedx-vscode') { "installed" } else { $null } } }
+        @{ Name = "java";                Canonical = "java";                Cmd = { & java -version 2>&1 | Select-Object -First 1 } }
     )
 
     foreach ($tool in $tools) {
@@ -779,7 +794,7 @@ function Run-HealthCheck {
 # ============================================================================
 
 # All canonical component names in dependency-safe order
-$ALL_COMPONENTS = @("curl", "scoop", "git", "python", "node", "uv", "claude", "sf", "heroku", "gh", "jq", "java", "vscode", "cursor", "ghostty")
+$ALL_COMPONENTS = @("curl", "scoop", "git", "python", "node", "uv", "claude", "sf", "heroku", "gh", "jq", "java", "vscode", "cursor", "sf-extension-cursor", "ghostty")
 
 function Normalize-Component {
     param([string]$Name)
@@ -793,6 +808,7 @@ function Normalize-Component {
         { $_ -in "github-cli", "github" }         { return "gh" }
         "heroku-cli"              { return "heroku" }
         { $_ -in "vs-code", "code" }              { return "vscode" }
+        { $_ -in "sf-extension", "salesforce-extension-cursor", "sf-ext-cursor" } { return "sf-extension-cursor" }
         default                   { return $Name }
     }
 }
@@ -803,6 +819,7 @@ function Get-Dependencies {
         "scoop"                   { return @() }
         { $_ -in "git", "python", "uv", "gh", "heroku", "jq", "java", "vscode", "cursor", "ghostty", "node" } { return @("scoop") }
         { $_ -in "claude", "sf" }  { return @("node") }
+        "sf-extension-cursor"     { return @("cursor") }
         default                   { return @() }
     }
 }
@@ -822,8 +839,9 @@ function Get-Label {
         "jq"      { return "jq (JSON processor)" }
         "java"    { return "Java 21 (OpenJDK)" }
         "vscode"  { return "VS Code" }
-        "cursor"  { return "Cursor" }
-        "ghostty" { return "Ghostty terminal" }
+        "cursor"              { return "Cursor" }
+        "sf-extension-cursor" { return "Salesforce Extension Pack for Cursor" }
+        "ghostty"             { return "Ghostty terminal" }
         default   { return $Component }
     }
 }
@@ -844,8 +862,9 @@ function Check-Component {
         "jq"      { return Check-Jq }
         "java"    { return Check-Java }
         "vscode"  { return Check-VsCode }
-        "cursor"  { return Check-Cursor }
-        "ghostty" { return Check-Ghostty }
+        "cursor"              { return Check-Cursor }
+        "sf-extension-cursor" { return Check-SfExtensionCursor }
+        "ghostty"             { return Check-Ghostty }
         default   { Print-Error "Unknown component: $Component"; return $false }
     }
 }
@@ -866,8 +885,9 @@ function Install-Component {
         "jq"      { Install-Jq }
         "java"    { Install-Java }
         "vscode"  { Install-VsCode }
-        "cursor"  { Install-Cursor }
-        "ghostty" { Install-Ghostty }
+        "cursor"              { Install-Cursor }
+        "sf-extension-cursor" { Install-SfExtensionCursor }
+        "ghostty"             { Install-Ghostty }
     }
 }
 
@@ -894,7 +914,7 @@ function Show-Help {
     Write-Host ""
     Write-Host "  Components:"
     Write-Host "    curl  scoop  git  python  node  uv  claude  sf  heroku"
-    Write-Host "    gh    jq     java  vscode  cursor  ghostty"
+    Write-Host "    gh    jq     java  vscode  cursor  sf-extension-cursor  ghostty"
     Write-Host ""
     Write-Host "  Aliases:"
     Write-Host "    homebrew, brew, python3, nodejs, claude-code,"
@@ -1043,6 +1063,9 @@ function Main {
     if (-not (Check-Java))    { if (Confirm-Action "Install Java 21 (OpenJDK)?" "n")    { Install-Java } }
     if (-not (Check-VsCode))  { if (Confirm-Action "Install VS Code?" "n")              { Install-VsCode } }
     if (-not (Check-Cursor))  { if (Confirm-Action "Install Cursor?" "n")               { Install-Cursor } }
+    if (Get-Command cursor -ErrorAction SilentlyContinue) {
+        if (-not (Check-SfExtensionCursor)) { if (Confirm-Action "Install Salesforce Extension Pack for Cursor?" "n") { Install-SfExtensionCursor } }
+    }
     if (-not (Check-Ghostty)) { if (Confirm-Action "Install Ghostty terminal?" "n")     { Install-Ghostty } }
 
     # ─────────────────────────────────────────────────────────────────────
@@ -1081,14 +1104,4 @@ function Main {
     Write-Host ""
 }
 
-Write-Host "[DEBUG] Initialization complete, calling Main..." -ForegroundColor DarkYellow
-try {
-    Main
-} catch {
-    Write-Host ""
-    Write-Host "  [FATAL] Script crashed: $_" -ForegroundColor Red
-    Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray
-}
-Write-Host ""
-Write-Host "  [DEBUG] Script finished. Press Enter to close." -ForegroundColor DarkYellow
-Read-Host
+Main
