@@ -451,40 +451,33 @@ function Check-Cursor {
 }
 
 function Install-Cursor {
-    Print-Info "Installing Cursor via Scoop..."
-    Ensure-ScoopBucket "extras"
-    & scoop install cursor
-    $scoopExit = $LASTEXITCODE
+    # Try winget first — it's built into Windows 10/11 and handles GUI apps reliably.
+    # Scoop's cursor package silently fails to place the exe in any discoverable location.
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Print-Info "Installing Cursor via winget..."
+        & winget install --id Cursor.Cursor --silent --accept-package-agreements --accept-source-agreements
+    } else {
+        Print-Info "Installing Cursor via Scoop (winget not available)..."
+        Ensure-ScoopBucket "extras"
+        & scoop install cursor
+    }
+
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
 
-    # Cursor's installer may be async (NSIS/Squirrel). Poll up to 30s.
+    # Cursor's installer is async (Squirrel/NSIS). Poll up to 60s for the exe to appear.
+    Print-Info "Waiting for Cursor installer to complete..."
     $waited = 0
-    while (-not (Find-Cursor) -and $waited -lt 30) {
+    while (-not (Find-Cursor) -and $waited -lt 60) {
         Start-Sleep -Seconds 2
         $waited += 2
     }
 
     $found = Find-Cursor
     if ($found) {
-        Print-Success "Cursor installed: $found"
+        Print-Success "Cursor installed"
     } else {
-        if ($scoopExit -and $scoopExit -ne 0) {
-            Print-Error "Scoop install failed (exit $scoopExit) — Cursor was not installed"
-        } else {
-            Print-Warning "Cursor installer ran but executable not found after 30s"
-        }
-        # Diagnostic: show what scoop knows and what registry says
-        $scoopWhich = & scoop which cursor 2>&1 | Select-Object -First 1
-        Write-Host "    scoop which cursor: $scoopWhich" -ForegroundColor DarkGray
-        $regEntry = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' -ErrorAction SilentlyContinue |
-                    Get-ItemProperty -ErrorAction SilentlyContinue |
-                    Where-Object { $_.DisplayName -like '*Cursor*' } |
-                    Select-Object DisplayName, InstallLocation, DisplayIcon -First 1
-        if ($regEntry) {
-            Write-Host "    Registry: $($regEntry.DisplayName) @ $($regEntry.InstallLocation)" -ForegroundColor DarkGray
-        } else {
-            Write-Host "    Registry: no Cursor entry found in HKCU Uninstall" -ForegroundColor DarkGray
-        }
+        Print-Warning "Cursor installer launched but executable not found after 60s"
+        Print-Info "Restart your terminal and re-run to install the Salesforce extension"
     }
 }
 
