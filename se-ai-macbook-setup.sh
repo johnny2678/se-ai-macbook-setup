@@ -380,7 +380,7 @@ install_jq() {
 check_vscode() {
     print_step "Checking VS Code..."
     explain "Popular editor with Claude Code extension support."
-    if command -v code &>/dev/null || [[ -d "/Applications/Visual Studio Code.app" ]]; then
+    if command -v code &>/dev/null || [[ -d "/Applications/Visual Studio Code.app" ]] || [[ -d "$HOME/Applications/Visual Studio Code.app" ]]; then
         print_success "VS Code found"
         return 0
     fi
@@ -1181,14 +1181,14 @@ main() {
     echo -e "${BOLD}Phase 4: Optional Extras${NC}"
     echo "════════════════════════════════════════════════"
 
-    check_jq       || { confirm "Install jq (JSON processor)?" "n" && install_jq; }
-    check_java     || { confirm "Install Java 21 (OpenJDK)?" "n" && install_java; }
-    check_vscode   || { confirm "Install VS Code?" "n" && install_vscode; }
-    check_cursor   || { confirm "Install Cursor?" "n" && install_cursor; }
+    check_jq       || { if confirm "Install jq (JSON processor)?" "n"; then install_jq;     else print_info "Skipped — install later with: brew install jq"; fi; }
+    check_java     || { if confirm "Install Java 21 (OpenJDK)?" "n";  then install_java;   else print_info "Skipped — install later with: brew install openjdk@21"; fi; }
+    check_vscode   || { if confirm "Install VS Code?" "n";             then install_vscode; else print_info "Skipped — install later with: brew install --cask visual-studio-code"; fi; }
+    check_cursor   || { if confirm "Install Cursor?" "n";              then install_cursor; else print_info "Skipped — install later with: brew install --cask cursor"; fi; }
     if command -v cursor &>/dev/null || [[ -d "/Applications/Cursor.app" ]]; then
-        check_sf_extension_cursor || { confirm "Install Salesforce Extension Pack for Cursor?" "n" && install_sf_extension_cursor; }
+        check_sf_extension_cursor || { if confirm "Install Salesforce Extension Pack for Cursor?" "n"; then install_sf_extension_cursor; else print_info "Skipped — install later with: cursor --install-extension salesforce.salesforcedx-vscode"; fi; }
     fi
-    check_ghostty  || { confirm "Install Ghostty terminal?" "n" && install_ghostty; }
+    check_ghostty  || { if confirm "Install Ghostty terminal?" "n";    then install_ghostty; else print_info "Skipped — install later with: brew install --cask ghostty"; fi; }
 
     # ─────────────────────────────────────────────────────────────────────
     # Phase 6: Salesforce Git Access
