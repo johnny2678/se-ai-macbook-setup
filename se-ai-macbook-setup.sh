@@ -595,6 +595,70 @@ get_emu_account() {
         | sed 's/.*= "//' | tr -d '"' | head -1
 }
 
+show_soma_steps() {
+    echo ""
+    echo -e "${BOLD}  git.soma Setup Guide${NC}"
+    echo "  ────────────────────────────────────────"
+    echo ""
+    print_info "Step 1: Request AD group access via IIQ"
+    print_info "  1. Go to salesforce.okta.com → search for IdentityIQ (IIQ)"
+    print_info "  2. Click Manage User Access → select yourself → Next"
+    print_info "  3. Search for 'Technology-RnD-Access' and submit with a justification"
+    print_info "  Contractors: also request 'Aloha - BPO GitSoma'"
+    echo ""
+    print_info "Step 2: Manager approval"
+    print_info "  An approval email is sent to your manager automatically."
+    print_info "  Give them a heads-up — they approve via email."
+    echo ""
+    print_info "Step 3: Wait for access to propagate (~4 hours, up to 24–48 hours)"
+    echo ""
+    print_info "Step 4: First login — go to git.soma.salesforce.com"
+    print_info "  Your account is created automatically on first Okta SSO login."
+    echo ""
+    print_info "Step 5: Generate a Personal Access Token"
+    print_info "  Profile → Settings → Access Tokens"
+    print_info "  Required scopes: read_repository, write_repository"
+    echo ""
+    print_info "Step 6: Cache credentials in macOS Keychain"
+    print_info "  Clone any repo via HTTPS — macOS will prompt for your username and PAT."
+    print_info "  git clone https://git.soma.salesforce.com/<org>/<repo>.git"
+    print_info "  Use your PAT as the password — Keychain will cache it."
+    echo ""
+    print_info "Help: Slack #scm-git-collab or #help-techforce"
+}
+
+show_emu_steps() {
+    echo ""
+    echo -e "${BOLD}  git EMU Setup Guide${NC}"
+    echo "  ────────────────────────────────────────"
+    echo ""
+    print_info "Step 1: Create your EMU account"
+    print_info "  1. Go to salesforce.okta.com"
+    print_info "  2. Find and click 'GitHub Salesforce - EMU'"
+    print_info "  Your username will end in _sfemu (e.g. jsmith_sfemu)"
+    echo ""
+    print_info "Step 2: Request org access via IIQ"
+    print_info "  1. Open IdentityIQ (IIQ) in Okta"
+    print_info "  2. Search for 'GHEC_<org-name>_Users' (e.g. GHEC_salesforce-ux-emu_Users)"
+    print_info "  3. Not sure which group? Use /prodeng github-access in Slack"
+    print_info "  4. Submit with a business justification"
+    echo ""
+    print_info "Step 3: Manager approval + wait 20 min to 4+ hours"
+    print_info "  Verify by visiting the org URL on github.com."
+    echo ""
+    print_info "Step 4: Generate a Personal Access Token"
+    print_info "  Log in to github.com as your _sfemu account"
+    print_info "  Settings → Developer settings → Personal access tokens → Tokens (classic)"
+    print_info "  Required scopes: repo, read:org"
+    echo ""
+    print_info "Step 5: Cache credentials in macOS Keychain"
+    print_info "  Clone any EMU repo via HTTPS — macOS will prompt for credentials."
+    print_info "  git clone https://github.com/<salesforce-emu-org>/<repo>.git"
+    print_info "  Use your _sfemu username and PAT as the password."
+    echo ""
+    print_info "Help: /prodeng github-access in Slack"
+}
+
 setup_git_soma() {
     echo ""
     echo -e "${BOLD}  git.soma (GitHub Enterprise)${NC}"
@@ -793,16 +857,20 @@ run_git_access_phase() {
     echo ""
     if $soma_ok; then
         print_success "git.soma already authenticated — skipping"
-    elif confirm "Set up git.soma (git.soma.salesforce.com)?"; then
-        setup_git_soma
+    elif confirm "Show git.soma setup steps?"; then
+        show_soma_steps
+    else
+        print_info "Skipped — see docs/git-soma-setup.md for setup steps"
     fi
 
     # git EMU — skip prompt if already authenticated
     echo ""
     if $emu_ok; then
         print_success "git EMU already authenticated — skipping"
-    elif confirm "Set up git EMU (github.com _sfemu account)?"; then
-        setup_git_emu
+    elif confirm "Show git EMU setup steps?"; then
+        show_emu_steps
+    else
+        print_info "Skipped — see docs/git-emu-setup.md for setup steps"
     fi
 }
 
