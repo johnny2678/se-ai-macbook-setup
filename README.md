@@ -6,11 +6,14 @@ A one-shot setup script for Salesforce employees to install and configure all to
 
 ### macOS
 
+Download, then run. The script needs an interactive terminal for confirmation prompts and for Homebrew's admin-password prompt — piping `curl ... | bash` breaks both.
+
 ```bash
-curl -sSL https://raw.githubusercontent.com/johnny2678/se-ai-macbook-setup/main/se-ai-macbook-setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/johnny2678/se-ai-macbook-setup/main/se-ai-macbook-setup.sh -o se-ai-macbook-setup.sh
+bash se-ai-macbook-setup.sh
 ```
 
-Or run locally:
+Or clone the repo:
 
 ```bash
 git clone https://git.soma.salesforce.com/john-hill/se-ai-macbook-setup.git
@@ -38,8 +41,9 @@ cd se-ai-macbook-setup
 Install only specific components (dependencies are resolved automatically):
 
 ```bash
-# macOS — one-liner
-curl -sSL https://raw.githubusercontent.com/johnny2678/se-ai-macbook-setup/main/se-ai-macbook-setup.sh | bash -s -- node git claude
+# macOS — download then run with args
+curl -fsSL https://raw.githubusercontent.com/johnny2678/se-ai-macbook-setup/main/se-ai-macbook-setup.sh -o se-ai-macbook-setup.sh
+bash se-ai-macbook-setup.sh node git claude
 
 # macOS — local
 ./se-ai-macbook-setup.sh node git claude

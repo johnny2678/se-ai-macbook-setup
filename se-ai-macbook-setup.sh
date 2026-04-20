@@ -98,6 +98,19 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
     exit 1
 fi
 
+# Require an interactive terminal — this script uses confirm() prompts and the
+# Homebrew installer needs a TTY to request your admin password. Running via
+# `curl ... | bash` connects stdin to the script bytes, so prompts break and
+# Homebrew silently switches to NONINTERACTIVE mode.
+if [[ ! -t 0 ]]; then
+    echo "Error: This script needs an interactive terminal."
+    echo ""
+    echo "Download first, then run:"
+    echo "  curl -fsSL https://raw.githubusercontent.com/johnny2678/se-ai-macbook-setup/main/se-ai-macbook-setup.sh -o se-ai-macbook-setup.sh"
+    echo "  bash se-ai-macbook-setup.sh"
+    exit 1
+fi
+
 # ============================================================================
 # HOMEBREW
 # ============================================================================
@@ -115,6 +128,8 @@ check_homebrew() {
 
 install_homebrew() {
     print_info "Installing Homebrew..."
+    print_warning "Homebrew needs your macOS admin password (sudo) to set up /opt/homebrew or /usr/local."
+    print_info "The prompt below comes from Homebrew's official installer, not this script."
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
     if [[ -f "/opt/homebrew/bin/brew" ]]; then
